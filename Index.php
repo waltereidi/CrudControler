@@ -1,7 +1,7 @@
 <?php 
     namespace index ; 
     use ConectorDatabase\DatabaseConnect\DatabaseConnect; 
-    require_once 'DatabaseConnect.php';
+    require_once 'ConectorDatabase\DatabaseConnect.php';
 
     $con = new DatabaseConnect();
     $pdo = $con->databaseConnection();
