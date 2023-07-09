@@ -5,8 +5,6 @@
         public $CriadoEm  ;
         public $UltimaModificacao ;
     }
-    function __construct(){
-        
-    }
+    
 
 ?>

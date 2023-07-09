@@ -5,7 +5,11 @@
 
     class TabelaTeste extends EntidadeBase {
         public $Descricao ;
+        public $Quantidade; 
+            
 
     } 
 
+
+    
 ?>

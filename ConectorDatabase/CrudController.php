@@ -5,11 +5,14 @@
     require_once 'DatabaseConnect.php';
 
     use Entidade\EntidadeBase\EntidadeBase ;
-    require_once '..\Entidade\EntidadeBase.php' ;  
+    use PDO;
+use Exception;
+
+    require_once '.\Entidade\EntidadeBase.php' ;  
 
 
     class CrudController {
-        private $PDO ;
+        public $PDO ;
 
 
     function __construct(){
@@ -17,57 +20,85 @@
         $this->PDO = $db->databaseConnection();
     }
 
-    function getCamposEntidadeSelect(EntidadeBase $entidade ){
+    public function getCamposEntidadeSelect(EntidadeBase $entidade ){
         
         $campos = implode( ',', array_keys(get_class_vars(get_class( $entidade ) )) );
         return $campos;
     }
-    function getCamposEntidadeUpdate(EntidadeBase $entidade ){
+    public function getCamposEntidadeUpdate(EntidadeBase $entidade ){
         $campos =  array_keys(get_class_vars(get_class( $entidade ) ));
-        $camposMerge=[];
+        $camposMerge='';
         foreach($campos as $campo ){
-            $camposMerge = $campo.'= :'.$campo ; 
+            $camposMerge .= $campo.'= :'.$campo.' ,' ; 
         }
-        return $camposMerge ; 
+        return strtolower(substr($camposMerge , 0 , -1)); 
     }
-    function getCamposEntidadeInsert(EntidadeBase $entidade ){
+    public function getCamposEntidadeInsert(EntidadeBase $entidade ) : string{
         $campos =  array_keys(get_class_vars(get_class( $entidade ) ));
-        $camposInsert=[];
+        $camposInsert='';
         foreach($campos as $campo ){
             if($campo != 'Id'){
-                $camposInsert = ':'.$campo ; 
+                $camposInsert .= ' :'.$campo.' ,'; 
             }
         }
-        return $camposInsert ; 
+        
+        return substr($camposInsert, 0,-1); ; 
     }
     
-    function getNomeTabela(EntidadeBase $entidade ){
-        $nomeTabela = get_class( $entidade ) ; 
-        return $nomeTabela; 
+    public function getNomeTabela(EntidadeBase $entidade ){
+        $nomeTabela = explode( '\\' , get_class( $entidade ) ) ; 
+        return $nomeTabela[count($nomeTabela) -1 ]; 
     }
     
-    function retorna(EntidadeBase $entidade , int $id  ){
-        $query = 'select :campos from :nomeTabela where id = :id '; 
-        $statement = $PDO->prepare($query) ; 
-        $params = [];
-        $params['campos'] = getCamposEntidade($entidade);
-        $params['nomeTabela'] =  getNomeTabela($entidade);
-        $params['Id'] = $id ; 
+    public function retorna(EntidadeBase $entidade ){
+        $query = 'select '.$this->getCamposEntidadeSelect($entidade).' from '.$this->getNomeTabela($entidade).' where id = :Id '; 
+        $statement = $this->PDO->prepare($query) ; 
+        $statement->bindValue('Id' , $entidade->Id);
+
         try{
-            $statement->execute($params);
-            return $statement->fetchAll();
+            $statement->execute();
+            $retornoQuery = $statement->fetch() ;
+            if($retornoQuery){
+                foreach( array_keys($retornoQuery) as $column ){
+              
+                    foreach( array_keys(get_class_vars(get_class( $entidade ) )) as $nomeColuna ){
+                        if( strtolower( $nomeColuna ) == strtolower($column) )
+                        {
+                            $entidade->$nomeColuna  = $retornoQuery[$column] ;
+                        }
+                    }
+                    
+                }
+                return $entidade ; 
+            }else{
+                return null; 
+            }
+            
         }
         catch(Exception $e ){
             throw $e ; 
             return null ; 
         }
+    }
 
-    function update(EntidadeBase $entidade , int $id ){
-        $query = 'update :nomeTabela SET '.getCamposEntidadeUpdate($entidade).' where id = :Id ' ;
-        $statement = $PDO->prepare($query); 
-        $entidade['nomeTabela'] = getNomeTabela($entidade);
+    public function update(EntidadeBase $entidade ){
+        $query = 'update '.$this->getNomeTabela($entidade).' SET '.$this->getCamposEntidadeUpdate($entidade).' where id = '.$entidade->Id ;
+        $statement = $this->PDO->prepare($query); 
+        foreach(  array_keys(get_class_vars(get_class( $entidade ) )) as $coluna ){
+            if(strtolower($coluna) == 'ultimamodificacao'){
+                $statement->bindValue('ultimamodificacao' , 'now()' ) ;
+            }else{
+                if($entidade->$coluna == null ){
+                    $statement->bindValue( ':'.strtolower($coluna) ,$entidade->$coluna , PDO::PARAM_NULL  );
+                }else{
+                    $statement->bindValue( ':'.strtolower($coluna) ,$entidade->$coluna , PDO::PARAM_STR  );
+                }
+            }
+        }
+
         try{
-            return $statement->execute($entidade); 
+            $statement->execute();
+            return $statement->rowCount();
         }
         catch(Exception $e)
         {
@@ -76,13 +107,30 @@
         }
 
     }        
-    function insert(EntidadeBase $entidade){
-        $query ='insert into :nomeTabela(:campos)('.getCamposEntidadeInsert($entidade).')';
-        $statement = $PDO->prepare($query);
-        $entidade['nomeTabela'] = getNomeTabela($entidade);
-        $entidade['campos'] = getCamposEntidadeSelect($entidade);
+    public function insert(EntidadeBase $entidade){
+        
+        $query ='insert into '.$this->getNomeTabela($entidade).'('.str_replace(':','',$this->getCamposEntidadeInsert($entidade)).') values('.$this->getCamposEntidadeInsert($entidade).')';
+        
+        
+        $statement = $this->PDO->prepare($query);
+        $entidadeInsert = (array)$entidade;
+        unset($entidadeInsert['Id']);  
+
+        foreach(array_keys($entidadeInsert) as $campo ){
+            if($entidadeInsert[$campo] == null ){
+                $statement->bindValue( $campo , $entidadeInsert[$campo] , PDO::PARAM_NULL);
+            }else{
+            switch($campo){
+            case 'UltimaModificacao' : $statement->bindvalue($campo , 'now()'); break;
+            case 'CriadoEm': $statement->bindValue( $campo , 'now()' ); break; 
+            default: 
+            $statement->bindValue( $campo , $entidadeInsert[$campo] );
+            }}
+        }
+        
         try{
-            return $statement->execute($entidade);
+            $statement->execute();
+            return $statement->fetchAll();
         }
         catch(Exception $e){
             throw $e ; 
@@ -91,16 +139,19 @@
 
     }
 
-    function delete(EntidadeBase $entidade , int $id ){
-        $query = 'delete from :nomeTabela where Id = :Id';
-        $statement = $PDO->prepare($query);
-        $statement->bindValue( );
-        $params = [];
-        $params['nomeTabela'] = getNomeTabela($entidade); 
-        $params['Id'] = $id ; 
+    public function delete(EntidadeBase $entidade ){
+        $query = 'delete from '.$this->getNomeTabela($entidade).' where Id = '.$entidade->Id;
+        $statement = $this->PDO->prepare($query);
+        
+        
 
         try{
-            return $statement->execute($params);
+            if($statement->execute() )
+            {
+                return $statement->rowCount();
+            }else{
+                return 'Erro ao executar a query "'.$query.'"';
+            }
         }
         catch(Exception $e){
             throw $e ;
@@ -110,19 +161,30 @@
 
     }
 
-    function executar($query , $params){
-        $statement = $PDO->prepare($query);
+    public function executar( $query , $params){
+        $statement =$this->PDO->prepare($query);
+        foreach(array_keys($params) as $param){
+            if($params[$param] == null ){
+                $statement->bindValue( $param , $params[$param] , PDO::PARAM_NULL );    
+            }else{
+                $statement->bindValue( $param , $params[$param] );
+            }
+
+        }
+        
         try{
-            return $statement->execute($params);
+
+            $statement->execute($params);
+            $retorno = $statement->fetchAll();
+            return $retorno ;
         }
         catch(Exception $e){
-            return null ; 
+            return $e ; 
         }
 
     }
-        
+   
     }
     
-}
 
 ?>
